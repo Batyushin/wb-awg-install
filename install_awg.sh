@@ -34,10 +34,13 @@ done
 
 echo -e "\n${GREEN}✅ Конфигурация успешно принята! Начинаем установку...${RESET}"
 
-# Останавливаем текущий туннель, если он работал
+# --- ХИРУРГИЧЕСКАЯ ЗАЧИСТКА ---
+# Полностью удаляем старый интерфейс и все его маршруты
 if ip link show awg0 > /dev/null 2>&1; then
-    echo -e "${YELLOW}⏳ Останавливаем старый туннель...${RESET}"
+    echo -e "${YELLOW}⏳ Очистка старой конфигурации...${RESET}"
     awg-quick down awg0 2>/dev/null
+    ip addr flush dev awg0 2>/dev/null
+    ip link delete awg0 2>/dev/null
 fi
 
 # Применяем новый конфиг
