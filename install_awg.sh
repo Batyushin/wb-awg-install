@@ -180,7 +180,9 @@ install_dependencies() {
             libelf-dev
     } >/dev/null 2>&1 &
 
-    spinner $!
+    local pid=$!
+    spinner $pid
+    wait $pid || { echo -e "${RED}Ошибка установки пакетов!${RESET}"; exit 1; }
     echo -e "${GREEN}OK${RESET}"
 }
 
@@ -204,7 +206,9 @@ install_go() {
         tar -C /usr/local -xzf /tmp/go.tar.gz
     } >/dev/null 2>&1 &
 
-    spinner $!
+    local pid=$!
+    spinner $pid
+    wait $pid || { echo -e "${RED}Ошибка скачивания/установки Go!${RESET}"; exit 1; }
 
     export PATH=$PATH:/usr/local/go/bin
     echo -e "${GREEN}OK${RESET}"
@@ -235,7 +239,9 @@ install_amneziawg_go() {
         chmod +x /usr/bin/amneziawg-go
     } >/dev/null 2>&1 &
 
-    spinner $!
+    local pid=$!
+    spinner $pid
+    wait $pid || { echo -e "${RED}Ошибка компиляции amneziawg-go!${RESET}"; exit 1; }
     echo -e "${GREEN}OK${RESET}"
 }
 
@@ -262,7 +268,9 @@ install_awg_tools() {
         make install >/dev/null 2>&1
     } >/dev/null 2>&1 &
 
-    spinner $!
+    local pid=$!
+    spinner $pid
+    wait $pid || { echo -e "${RED}Ошибка компиляции awg-tools!${RESET}"; exit 1; }
     echo -e "${GREEN}OK${RESET}"
 }
 
@@ -346,9 +354,8 @@ read_config() {
     echo -e "      ${GRAY}Полезно, если провайдер блокирует Telegram, обновления и т.д.${RESET}"
     echo
 
-while true; do
-        # Добавлено < /dev/tty в конце строки!
-        read -p "$(echo -e ${CYAN}"Ваш выбор [1 или 2]: "${RESET})" routing_choice < /dev/tty
+    while true; do
+        read -p "$(echo -e "${CYAN}Ваш выбор [1 или 2]: ${RESET}")" routing_choice < /dev/tty
         
         case $routing_choice in
             1)
@@ -368,7 +375,7 @@ while true; do
     done
     echo
 
-    # Вырезаем старые AllowedIPs, чтобы избежать дублей (работает и с GNU, и с BSD sed)
+    # Вырезаем старые AllowedIPs, чтобы избежать дублей
     sed -i -e '/^[Aa]llowed[Ii][Pp]s/d' "$CONFIG_FILE" 2>/dev/null || sed -i '/^AllowedIPs/d' "$CONFIG_FILE"
 
     # Прописываем новые маршруты
