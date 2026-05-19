@@ -346,8 +346,10 @@ read_config() {
     echo -e "      ${GRAY}Полезно, если провайдер блокирует Telegram, обновления и т.д.${RESET}"
     echo
 
-    while true; do
-        read -p "$(echo -e ${CYAN}"Ваш выбор [1 или 2]: "${RESET})" routing_choice
+while true; do
+        # Добавлено < /dev/tty в конце строки!
+        read -p "$(echo -e ${CYAN}"Ваш выбор [1 или 2]: "${RESET})" routing_choice < /dev/tty
+        
         case $routing_choice in
             1)
                 echo -e "${GREEN}✅ Выбран режим: Только удаленный доступ${RESET}"
