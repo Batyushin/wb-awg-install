@@ -6,7 +6,7 @@ set -Eeuo pipefail
 #  AmneziaWG Installer for Wiren Board
 # ============================================================
 
-VERSION="2.2"
+VERSION="2.3"
 
 # ============================================================
 # Colors
@@ -121,7 +121,6 @@ show_header() {
 backup_dns() {
     if [[ ! -f "$DNS_BACKUP" ]]; then
         cp /etc/resolv.conf "$DNS_BACKUP" 2>/dev/null || true
-        # Временно ставим надежные DNS для скачивания пакетов и исходников
         cat > /etc/resolv.conf <<EOF
 nameserver 8.8.8.8
 nameserver 1.1.1.1
@@ -150,7 +149,6 @@ cleanup_temp() {
 
 check_internet() {
     echo -ne "${CYAN}Проверка интернета... ${RESET}"
-
     if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
         echo -e "${GREEN}OK${RESET}"
     else
@@ -166,20 +164,12 @@ check_internet() {
 
 install_dependencies() {
     echo -ne "${CYAN}Установка зависимостей... ${RESET}"
-
     {
         apt-get update
         apt-get install -y \
-            git \
-            make \
-            gcc \
-            g++ \
-            wget \
-            curl \
-            libmnl-dev \
-            libelf-dev
+            git make gcc g++ wget curl libmnl-dev libelf-dev
     } >/dev/null 2>&1 &
-
+    
     local pid=$!
     spinner $pid
     wait $pid || { echo -e "${RED}Ошибка установки пакетов!${RESET}"; exit 1; }
@@ -194,22 +184,17 @@ install_go() {
     if command -v go >/dev/null 2>&1; then
         return
     fi
-
     echo -ne "${CYAN}Установка Go... ${RESET}"
-
     {
-        wget -q \
-            "https://go.dev/dl/go1.22.3.${GO_ARCH}.tar.gz" \
-            -O /tmp/go.tar.gz
-
+        wget -q "https://go.dev/dl/go1.22.3.${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz
         rm -rf /usr/local/go
         tar -C /usr/local -xzf /tmp/go.tar.gz
     } >/dev/null 2>&1 &
-
+    
     local pid=$!
     spinner $pid
-    wait $pid || { echo -e "${RED}Ошибка скачивания/установки Go!${RESET}"; exit 1; }
-
+    wait $pid || { echo -e "${RED}Ошибка установки Go!${RESET}"; exit 1; }
+    
     export PATH=$PATH:/usr/local/go/bin
     echo -e "${GREEN}OK${RESET}"
 }
@@ -222,26 +207,21 @@ install_amneziawg_go() {
     if command -v amneziawg-go >/dev/null 2>&1; then
         return
     fi
-
     echo -ne "${CYAN}Сборка amneziawg-go... ${RESET}"
-
     {
         cd /tmp
         rm -rf amneziawg-go
-        git clone https://github.com/amnezia-vpn/amneziawg-go.git \
-            >/dev/null 2>&1
-
+        git clone https://github.com/amnezia-vpn/amneziawg-go.git >/dev/null 2>&1
         cd amneziawg-go
         export PATH=$PATH:/usr/local/go/bin
-
         make >/dev/null 2>&1
         cp amneziawg-go /usr/bin/
         chmod +x /usr/bin/amneziawg-go
     } >/dev/null 2>&1 &
-
+    
     local pid=$!
     spinner $pid
-    wait $pid || { echo -e "${RED}Ошибка компиляции amneziawg-go!${RESET}"; exit 1; }
+    wait $pid || { echo -e "${RED}Ошибка сборки!${RESET}"; exit 1; }
     echo -e "${GREEN}OK${RESET}"
 }
 
@@ -253,24 +233,19 @@ install_awg_tools() {
     if command -v awg-quick >/dev/null 2>&1; then
         return
     fi
-
     echo -ne "${CYAN}Сборка awg-tools... ${RESET}"
-
     {
         cd /tmp
         rm -rf amneziawg-tools
-        git clone https://github.com/amnezia-vpn/amneziawg-tools.git \
-            >/dev/null 2>&1
-
+        git clone https://github.com/amnezia-vpn/amneziawg-tools.git >/dev/null 2>&1
         cd amneziawg-tools/src
-
         make >/dev/null 2>&1
         make install >/dev/null 2>&1
     } >/dev/null 2>&1 &
-
+    
     local pid=$!
     spinner $pid
-    wait $pid || { echo -e "${RED}Ошибка компиляции awg-tools!${RESET}"; exit 1; }
+    wait $pid || { echo -e "${RED}Ошибка сборки!${RESET}"; exit 1; }
     echo -e "${GREEN}OK${RESET}"
 }
 
@@ -292,7 +267,6 @@ restore_backup() {
     if [[ -f "$BACKUP_FILE" ]]; then
         cp "$BACKUP_FILE" "$CONFIG_FILE"
         systemctl restart awg-quick@awg0 || true
-
         echo
         echo -e "${YELLOW}Восстановлен предыдущий конфиг${RESET}"
     fi
@@ -355,11 +329,16 @@ read_config() {
     echo
 
     while true; do
-        read -p "$(echo -e "${CYAN}Ваш выбор [1 или 2]: ${RESET}")" routing_choice < /dev/tty
+        routing_choice=""
+        # Защита от падения: || true не даст скрипту умереть, если read вернет ошибку из-за Enter
+        read -p "$(echo -e "${CYAN}Ваш выбор [1 или 2] (Enter = 1): ${RESET}")" routing_choice < /dev/tty || true
+        
+        # Если переменная пустая (нажали Enter), ставим 1
+        routing_choice=${routing_choice:-1}
         
         case $routing_choice in
             1)
-                echo -e "${GREEN}✅ Выбран режим: Только удаленный доступ${RESET}"
+                echo -e "${GREEN}✅ Выбран режим: Только удаленный доступ (По умолчанию)${RESET}"
                 ROUTE_MODE="split"
                 break
                 ;;
@@ -369,13 +348,13 @@ read_config() {
                 break
                 ;;
             *)
-                echo -e "${RED}Неверный ввод. Введите 1 или 2.${RESET}"
+                echo -e "${RED}Неверный ввод. Введите 1 или 2, либо просто нажмите Enter.${RESET}"
                 ;;
         esac
     done
     echo
 
-    # Вырезаем старые AllowedIPs, чтобы избежать дублей
+    # Вырезаем старые AllowedIPs
     sed -i -e '/^[Aa]llowed[Ii][Pp]s/d' "$CONFIG_FILE" 2>/dev/null || sed -i '/^AllowedIPs/d' "$CONFIG_FILE"
 
     # Прописываем новые маршруты
@@ -385,7 +364,7 @@ read_config() {
         sed -i "/^\[Peer\]/a AllowedIPs = 0.0.0.0/0, ::/0" "$CONFIG_FILE"
     fi
 
-    # Добавляем Keepalive для удержания туннеля, если его нет
+    # Добавляем Keepalive
     if ! grep -qi '^PersistentKeepalive' "$CONFIG_FILE"; then
         sed -i '/^\[Peer\]/a PersistentKeepalive = 25' "$CONFIG_FILE"
     fi
@@ -419,7 +398,6 @@ start_tunnel() {
         echo
         echo -e "${RED}Ошибка запуска туннеля${RESET}"
         systemctl status awg-quick@awg0 --no-pager || true
-        
         restore_backup
         restore_dns
         cleanup_temp
@@ -430,7 +408,6 @@ start_tunnel() {
 
     if ! ip link show awg0 >/dev/null 2>&1; then
         echo -e "${RED}Интерфейс awg0 не поднялся${RESET}"
-        
         restore_backup
         restore_dns
         cleanup_temp
@@ -444,12 +421,10 @@ start_tunnel() {
 
 remove_awg() {
     echo -e "${YELLOW}Удаление AmneziaWG...${RESET}"
-
     stop_tunnel
     systemctl disable awg-quick@awg0 2>/dev/null || true
     rm -f /etc/systemd/system/multi-user.target.wants/awg-quick@awg0.service
     rm -rf "$CONFIG_DIR"
-    
     echo -e "${GREEN}Удаление завершено${RESET}"
 }
 
@@ -472,7 +447,6 @@ show_status() {
     TUNNEL_IP=$(grep '^Address' "$CONFIG_FILE" | head -n1 | cut -d '=' -f2 | xargs)
     echo -e "Tunnel IP: ${BLUE}${TUNNEL_IP}${RESET}"
     echo
-
     awg show || true
     echo
 }
@@ -489,49 +463,38 @@ main() {
         install)
             backup_dns
             check_internet
-
             install_dependencies
             install_go
             install_amneziawg_go
             install_awg_tools
-
             backup_config
             read_config
             stop_tunnel
             start_tunnel
-            
             restore_dns
             cleanup_temp
             show_status
             ;;
-
         reinstall)
             backup_dns
             check_internet
-            
             remove_awg
-
             install_dependencies
             install_go
             install_amneziawg_go
             install_awg_tools
-
             read_config
             start_tunnel
-            
             restore_dns
             cleanup_temp
             show_status
             ;;
-
         remove)
             remove_awg
             ;;
-
         status)
             systemctl status awg-quick@awg0 --no-pager
             ;;
-
         *)
             echo
             echo "Использование:"
@@ -541,7 +504,6 @@ main() {
             echo "remove    - удаление"
             echo "status    - статус"
             echo
-
             exit 1
             ;;
     esac
