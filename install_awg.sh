@@ -10,6 +10,7 @@ GREEN='\033[1;32m'
 RED='\033[1;31m'
 YELLOW='\033[1;33m'
 CYAN='\033[1;36m'
+BLUE='\033[1;34m'
 GRAY='\033[1;90m'
 RESET='\033[0m'
 
@@ -50,16 +51,21 @@ fi
 # ============================================================
 
 detect_go_arch() {
+
     case "$(uname -m)" in
+
         armv6l|armv7l)
             echo "linux-armv6l"
             ;;
+
         aarch64)
             echo "linux-arm64"
             ;;
+
         x86_64)
             echo "linux-amd64"
             ;;
+
         *)
             echo ""
             ;;
@@ -78,6 +84,7 @@ fi
 # ============================================================
 
 show_header() {
+
     echo
     echo -e "${CYAN}============================================================${RESET}"
     echo -e "${GREEN} AmneziaWG installer for Wiren Board${RESET}"
@@ -86,12 +93,12 @@ show_header() {
 }
 
 # ============================================================
-# Remove installation
+# Remove old installation
 # ============================================================
 
 remove_awg() {
 
-    echo -e "${YELLOW}Удаление AmneziaWG...${RESET}"
+    echo -e "${YELLOW}Удаление старой конфигурации...${RESET}"
 
     systemctl stop awg-quick@awg0 2>/dev/null || true
     systemctl disable awg-quick@awg0 2>/dev/null || true
@@ -102,10 +109,9 @@ remove_awg() {
 
     rm -f /etc/systemd/system/multi-user.target.wants/awg-quick@awg0.service
 
-    rm -rf /etc/amnezia
-    rm -f /usr/bin/amneziawg-go
+    rm -f "$CONFIG_FILE"
 
-    echo -e "${GREEN}AmneziaWG удален.${RESET}"
+    echo -e "${GREEN}Очистка завершена.${RESET}"
 }
 
 # ============================================================
@@ -118,6 +124,7 @@ install_dependencies() {
 
     {
         apt-get update
+
         apt-get install -y \
             git \
             make \
@@ -155,6 +162,7 @@ install_go() {
         rm -rf /usr/local/go
 
         tar -C /usr/local -xzf /tmp/go.tar.gz
+
     } >/dev/null 2>&1 &
 
     spinner $!
@@ -191,6 +199,7 @@ install_amneziawg_go() {
         make >/dev/null 2>&1
 
         cp amneziawg-go /usr/bin/
+
         chmod +x /usr/bin/amneziawg-go
 
     } >/dev/null 2>&1 &
@@ -233,32 +242,87 @@ install_awg_tools() {
 }
 
 # ============================================================
-# Read config
+# Read config safely
 # ============================================================
 
 read_config() {
 
     mkdir -p "$CONFIG_DIR"
 
-    echo -e "${YELLOW}Вставьте конфиг AmneziaWG.${RESET}"
+    echo
+    echo -e "${YELLOW}📋 Вставьте конфиг AmneziaWG${RESET}"
     echo -e "${GRAY}Завершение ввода: CTRL+D${RESET}"
     echo
 
-    cat > "$CONFIG_FILE"
+    cat > "$CONFIG_FILE" < /dev/tty
+
+    echo
+
+    if [[ ! -s "$CONFIG_FILE" ]]; then
+        echo -e "${RED}Ошибка: конфиг пустой${RESET}"
+        exit 1
+    fi
+
+    if ! grep -q "\[Interface\]" "$CONFIG_FILE"; then
+        echo -e "${RED}Ошибка: отсутствует секция [Interface]${RESET}"
+        exit 1
+    fi
+
+    if ! grep -q "\[Peer\]" "$CONFIG_FILE"; then
+        echo -e "${RED}Ошибка: отсутствует секция [Peer]${RESET}"
+        exit 1
+    fi
+
+    # Удаляем CRLF
+    sed -i 's/\r//g' "$CONFIG_FILE"
+
+    # Добавляем Keepalive если отсутствует
+    if ! grep -qi '^PersistentKeepalive' "$CONFIG_FILE"; then
+
+        sed -i '/^\[Peer\]/a PersistentKeepalive = 25' "$CONFIG_FILE"
+    fi
 
     chmod 600 "$CONFIG_FILE"
 
-    echo
     echo -e "${GREEN}Конфиг сохранен.${RESET}"
 }
 
 # ============================================================
-# Start tunnel
+# Backup current config
+# ============================================================
+
+backup_config() {
+
+    if [[ -f "$CONFIG_FILE" ]]; then
+
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.backup"
+    fi
+}
+
+# ============================================================
+# Restore backup
+# ============================================================
+
+restore_backup() {
+
+    if [[ -f "${CONFIG_FILE}.backup" ]]; then
+
+        cp "${CONFIG_FILE}.backup" "$CONFIG_FILE"
+
+        systemctl restart awg-quick@awg0 || true
+
+        echo -e "${YELLOW}Восстановлен предыдущий конфиг.${RESET}"
+    fi
+}
+
+# ============================================================
+# Start tunnel safely
 # ============================================================
 
 start_tunnel() {
 
-    echo -e "${CYAN}Запуск туннеля...${RESET}"
+    echo
+    echo -e "${CYAN}🔌 Запуск туннеля...${RESET}"
 
     systemctl daemon-reload
 
@@ -266,9 +330,12 @@ start_tunnel() {
 
     if ! systemctl restart awg-quick@awg0; then
 
+        echo
         echo -e "${RED}Ошибка запуска туннеля${RESET}"
 
-        systemctl status awg-quick@awg0 --no-pager
+        systemctl status awg-quick@awg0 --no-pager || true
+
+        restore_backup
 
         exit 1
     fi
@@ -276,24 +343,30 @@ start_tunnel() {
     sleep 2
 
     if ! ip link show awg0 >/dev/null 2>&1; then
+
         echo -e "${RED}Интерфейс awg0 не поднялся${RESET}"
+
+        restore_backup
+
         exit 1
     fi
 }
 
 # ============================================================
-# Status
+# Show status
 # ============================================================
 
 show_status() {
 
     echo
     echo -e "${GREEN}============================================================${RESET}"
-    echo -e "${GREEN}Туннель успешно поднят${RESET}"
+    echo -e "${GREEN}🎉 Туннель успешно поднят${RESET}"
     echo -e "${GREEN}============================================================${RESET}"
 
     if command -v wb-gen-serial >/dev/null 2>&1; then
+
         SN=$(wb-gen-serial -s)
+
         echo
         echo -e "Контроллер: ${YELLOW}${SN}${RESET}"
     fi
@@ -303,6 +376,7 @@ show_status() {
     echo -e "Tunnel IP: ${BLUE}${TUNNEL_IP}${RESET}"
 
     echo
+
     awg show || true
 
     echo
@@ -322,6 +396,9 @@ case "${1:-install}" in
         install_go
         install_amneziawg_go
         install_awg_tools
+
+        backup_config
+
         read_config
         start_tunnel
         show_status
@@ -330,10 +407,12 @@ case "${1:-install}" in
     reinstall)
 
         remove_awg
+
         install_dependencies
         install_go
         install_amneziawg_go
         install_awg_tools
+
         read_config
         start_tunnel
         show_status
@@ -351,12 +430,13 @@ case "${1:-install}" in
 
     *)
 
+        echo
         echo "Использование:"
         echo
-        echo "./install.sh install"
-        echo "./install.sh reinstall"
-        echo "./install.sh remove"
-        echo "./install.sh status"
+        echo "install     - установка"
+        echo "reinstall   - переустановка"
+        echo "remove      - удаление"
+        echo "status      - статус"
         echo
 
         exit 1
