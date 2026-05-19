@@ -381,6 +381,9 @@ stop_tunnel() {
     systemctl stop awg-quick@awg0 2>/dev/null || true
     awg-quick down awg0 2>/dev/null || true
     ip link delete awg0 2>/dev/null || true
+    
+    # Даем системе время пристрелить зомби-процессы и освободить порты
+    sleep 2
 }
 
 # ============================================================
