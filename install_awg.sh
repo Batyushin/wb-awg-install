@@ -8,6 +8,21 @@ BLUE='\e[1;34m'
 GRAY='\e[1;30m'
 RESET='\e[0m'
 
+# Функция для анимации ожидания
+spinner() {
+    local pid=$1
+    local delay=0.1
+    local spinstr='|/-\'
+    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "    \b\b\b\b"
+}
+
 echo -e "\n${CYAN}============================================================${RESET}"
 echo -e "${GREEN}🛡️  Установка и настройка туннеля AmneziaWG для Wiren Board${RESET}"
 echo -e "${CYAN}============================================================${RESET}"
@@ -32,10 +47,9 @@ while IFS= read -r line; do
     echo "$line" >> /etc/amnezia/amneziawg/awg0.tmp
 done
 
-echo -e "\n${GREEN}✅ Конфигурация успешно принята! Начинаем установку...${RESET}"
+echo -e "\n${GREEN}✅ Конфигурация принята! Начинаем установку...${RESET}"
 
 # --- ХИРУРГИЧЕСКАЯ ЗАЧИСТКА ---
-# Полностью удаляем старый интерфейс и все его маршруты
 if ip link show awg0 > /dev/null 2>&1; then
     echo -e "${YELLOW}⏳ Очистка старой конфигурации...${RESET}"
     awg-quick down awg0 2>/dev/null
@@ -43,7 +57,6 @@ if ip link show awg0 > /dev/null 2>&1; then
     ip link delete awg0 2>/dev/null
 fi
 
-# Применяем новый конфиг
 mv /etc/amnezia/amneziawg/awg0.tmp /etc/amnezia/amneziawg/awg0.conf
 
 # --- АВТОМАТИЧЕСКАЯ ЗАЩИТА КОНФИГА ---
@@ -56,58 +69,50 @@ if grep -qi '^PersistentKeepalive' /etc/amnezia/amneziawg/awg0.conf; then
 else
     echo "PersistentKeepalive = 25" >> /etc/amnezia/amneziawg/awg0.conf
 fi
-# ------------------------------------
-
 chmod 600 /etc/amnezia/amneziawg/awg0.conf
 
-# Проверяем, установлена ли AmneziaWG
-if ! command -v awg-quick &> /dev/null; then
-    echo -e "\n${YELLOW}⚙️  AmneziaWG не найдена. Начинаем автоматическую сборку ядра...${RESET}"
-    echo -e "${GRAY}Это займет пару минут, подождите...${RESET}"
+# --- СБОРКА И УСТАНОВКА ---
+if ! command -v awg-quick &> /dev/null || ! command -v amneziawg-go &> /dev/null; then
+    echo -e "\n${YELLOW}⚙️  Начинаем сборку (это займет пару минут)...${RESET}"
     
-    echo "nameserver 8.8.8.8" > /etc/resolv.conf
-    apt-get update >/dev/null 2>&1 && apt-get install -y git make curl resolvconf wget >/dev/null 2>&1
+    echo -ne "${CYAN}📦 Установка зависимостей... ${RESET}"
+    { apt-get update && apt-get install -y git make curl resolvconf wget gcc g++ libmnl-dev libelf-dev; } >/dev/null 2>&1 &
+    spinner $!
+    echo -e "${GREEN}Готово!${RESET}"
 
-    LATEST_GO=$(curl -s https://go.dev/VERSION?m=text | head -n 1)
-    wget -qO- "https://go.dev/dl/${LATEST_GO}.linux-armv6l.tar.gz" | tar -C /usr/local -xzf -
-    export PATH=/usr/local/go/bin:$PATH
+    if [ ! -d "/usr/local/go" ]; then
+        echo -ne "${CYAN}📦 Загрузка и установка Go... ${RESET}"
+        { wget -q https://go.dev/dl/go1.22.3.linux-armv6l.tar.gz -O /tmp/go.tar.gz && tar -C /usr/local -xzf /tmp/go.tar.gz; } &
+        spinner $!
+        echo -e "${GREEN}Готово!${RESET}"
+    fi
+    export PATH=$PATH:/usr/local/go/bin
 
-    cd /tmp
-    rm -rf amneziawg-go amneziawg-tools
-    git clone https://github.com/amnezia-vpn/amneziawg-go.git >/dev/null 2>&1
-    cd amneziawg-go
-    make >/dev/null 2>&1
-    cp amneziawg-go /usr/bin/
+    echo -ne "${CYAN}🛠️  Сборка ядра amneziawg-go... ${RESET}"
+    { cd /tmp && rm -rf amneziawg-go && git clone https://github.com/amnezia-vpn/amneziawg-go.git >/dev/null 2>&1 && cd amneziawg-go && make >/dev/null 2>&1 && cp amneziawg-go /usr/bin/; } &
+    spinner $!
+    echo -e "${GREEN}Готово!${RESET}"
 
-    cd /tmp
-    git clone https://github.com/amnezia-vpn/amneziawg-tools.git >/dev/null 2>&1
-    cd amneziawg-tools/src
-    make >/dev/null 2>&1
-    make install >/dev/null 2>&1
+    echo -ne "${CYAN}🛠️  Сборка инструментов awg-tools... ${RESET}"
+    { cd /tmp && rm -rf amneziawg-tools && git clone https://github.com/amnezia-vpn/amneziawg-tools.git >/dev/null 2>&1 && cd amneziawg-tools/src && make >/dev/null 2>&1 && make install >/dev/null 2>&1; } &
+    spinner $!
+    echo -e "${GREEN}Готово!${RESET}"
     
-    rm -rf /tmp/amneziawg-*
-    echo -e "${GREEN}✅ Сборка успешно завершена!${RESET}"
+    rm -rf /tmp/amneziawg-* /tmp/go.tar.gz
 else
-    echo -e "\n${GREEN}✅ AmneziaWG уже установлена. Обновляем конфигурацию.${RESET}"
+    echo -e "\n${GREEN}✅ AmneziaWG уже установлена.${RESET}"
 fi
 
-# Запускаем туннель
+# Запуск
 echo -e "${CYAN}🔌 Запускаем туннель awg0...${RESET}"
 systemctl daemon-reload >/dev/null 2>&1
 systemctl enable awg-quick@awg0 >/dev/null 2>&1
 systemctl restart awg-quick@awg0 >/dev/null 2>&1
 
-# Получаем данные
 SN=$(wb-gen-serial -s)
-
 echo -e "\n${GREEN}============================================================${RESET}"
 echo -e "${GREEN}🎉 УСПЕШНО!${RESET} Туннель поднят на контроллере: ${YELLOW}${SN}${RESET}"
 echo -e "${GREEN}============================================================${RESET}\n"
-
-echo -e "Теперь вы можете управлять Wiren Board по этой ссылке:"
-echo -e "👉 ${BLUE}http://${TUNNEL_IP}${RESET}\n"
-
-echo -e "${GRAY}Разработка и поддержка:${RESET}"
-echo -e "🌐 ${CYAN}batyushin.ru${RESET}"
-echo -e "🚀 ${CYAN}https://t.me/BlogReD${RESET}"
+echo -e "IP адрес контроллера: ${BLUE}${TUNNEL_IP}${RESET}\n"
+echo -e "${GRAY}Разработка и поддержка: batyushin.ru | t.me/BlogReD${RESET}"
 echo -e "${GREEN}============================================================${RESET}\n"
