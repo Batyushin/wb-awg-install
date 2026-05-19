@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 # ============================================================
-#  AmneziaWG installer for Wiren Board
+#  AmneziaWG Installer for Wiren Board
+# ============================================================
+
+VERSION="2.0"
+
+# ============================================================
+# Colors
 # ============================================================
 
 GREEN='\033[1;32m'
@@ -14,37 +20,72 @@ BLUE='\033[1;34m'
 GRAY='\033[1;90m'
 RESET='\033[0m'
 
+# ============================================================
+# Paths
+# ============================================================
+
 CONFIG_DIR="/etc/amnezia/amneziawg"
 CONFIG_FILE="${CONFIG_DIR}/awg0.conf"
+BACKUP_FILE="${CONFIG_DIR}/awg0.conf.backup"
 
 # ============================================================
 # Spinner
 # ============================================================
 
 spinner() {
+
     local pid=$1
     local delay=0.1
     local spin='|/-\'
 
     while kill -0 "$pid" 2>/dev/null; do
+
         local temp=${spin#?}
+
         printf " [%c]  " "$spin"
+
         spin=$temp${spin%"$temp"}
+
         sleep $delay
+
         printf "\b\b\b\b\b\b"
+
     done
 
     printf "    \b\b\b\b"
 }
 
 # ============================================================
+# Error handler
+# ============================================================
+
+error_handler() {
+
+    local line="$1"
+
+    echo
+    echo -e "${RED}Ошибка выполнения скрипта (line: ${line})${RESET}"
+    echo
+
+    restore_dns || true
+
+    exit 1
+}
+
+trap 'error_handler ${LINENO}' ERR
+
+# ============================================================
 # Root check
 # ============================================================
 
-if [[ "$EUID" -ne 0 ]]; then
-    echo -e "${RED}Ошибка: запустите скрипт от root${RESET}"
-    exit 1
-fi
+check_root() {
+
+    if [[ "$EUID" -ne 0 ]]; then
+
+        echo -e "${RED}Запустите скрипт от root${RESET}"
+        exit 1
+    fi
+}
 
 # ============================================================
 # Detect architecture
@@ -74,11 +115,6 @@ detect_go_arch() {
 
 GO_ARCH=$(detect_go_arch)
 
-if [[ -z "$GO_ARCH" ]]; then
-    echo -e "${RED}Неподдерживаемая архитектура: $(uname -m)${RESET}"
-    exit 1
-fi
-
 # ============================================================
 # Header
 # ============================================================
@@ -88,30 +124,40 @@ show_header() {
     echo
     echo -e "${CYAN}============================================================${RESET}"
     echo -e "${GREEN} AmneziaWG installer for Wiren Board${RESET}"
+    echo -e "${GRAY} Version ${VERSION}${RESET}"
     echo -e "${CYAN}============================================================${RESET}"
     echo
 }
 
 # ============================================================
-# Remove old installation
+# Restore DNS
 # ============================================================
 
-remove_awg() {
+restore_dns() {
 
-    echo -e "${YELLOW}Удаление старой конфигурации...${RESET}"
+    cat > /etc/resolv.conf <<EOF
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+}
 
-    systemctl stop awg-quick@awg0 2>/dev/null || true
-    systemctl disable awg-quick@awg0 2>/dev/null || true
+# ============================================================
+# Check internet
+# ============================================================
 
-    awg-quick down awg0 2>/dev/null || true
+check_internet() {
 
-    ip link delete awg0 2>/dev/null || true
+    echo -ne "${CYAN}Проверка интернета... ${RESET}"
 
-    rm -f /etc/systemd/system/multi-user.target.wants/awg-quick@awg0.service
+    if ping -c 1 1.1.1.1 >/dev/null 2>&1; then
 
-    rm -f "$CONFIG_FILE"
+        echo -e "${GREEN}OK${RESET}"
 
-    echo -e "${GREEN}Очистка завершена.${RESET}"
+    else
+
+        echo -e "${RED}Нет доступа в интернет${RESET}"
+        exit 1
+    fi
 }
 
 # ============================================================
@@ -132,7 +178,6 @@ install_dependencies() {
             g++ \
             wget \
             curl \
-            resolvconf \
             libmnl-dev \
             libelf-dev
     } >/dev/null 2>&1 &
@@ -149,6 +194,7 @@ install_dependencies() {
 install_go() {
 
     if command -v go >/dev/null 2>&1; then
+
         return
     fi
 
@@ -179,6 +225,7 @@ install_go() {
 install_amneziawg_go() {
 
     if command -v amneziawg-go >/dev/null 2>&1; then
+
         return
     fi
 
@@ -216,6 +263,7 @@ install_amneziawg_go() {
 install_awg_tools() {
 
     if command -v awg-quick >/dev/null 2>&1; then
+
         return
     fi
 
@@ -242,6 +290,35 @@ install_awg_tools() {
 }
 
 # ============================================================
+# Backup config
+# ============================================================
+
+backup_config() {
+
+    if [[ -f "$CONFIG_FILE" ]]; then
+
+        cp "$CONFIG_FILE" "$BACKUP_FILE"
+    fi
+}
+
+# ============================================================
+# Restore backup
+# ============================================================
+
+restore_backup() {
+
+    if [[ -f "$BACKUP_FILE" ]]; then
+
+        cp "$BACKUP_FILE" "$CONFIG_FILE"
+
+        systemctl restart awg-quick@awg0 || true
+
+        echo
+        echo -e "${YELLOW}Восстановлен предыдущий конфиг${RESET}"
+    fi
+}
+
+# ============================================================
 # Read config safely
 # ============================================================
 
@@ -259,24 +336,29 @@ read_config() {
     echo
 
     if [[ ! -s "$CONFIG_FILE" ]]; then
-        echo -e "${RED}Ошибка: конфиг пустой${RESET}"
+
+        echo -e "${RED}Конфиг пустой${RESET}"
         exit 1
     fi
 
+    sed -i 's/\r//g' "$CONFIG_FILE"
+
     if ! grep -q "\[Interface\]" "$CONFIG_FILE"; then
-        echo -e "${RED}Ошибка: отсутствует секция [Interface]${RESET}"
+
+        echo -e "${RED}Ошибка: отсутствует [Interface]${RESET}"
         exit 1
     fi
 
     if ! grep -q "\[Peer\]" "$CONFIG_FILE"; then
-        echo -e "${RED}Ошибка: отсутствует секция [Peer]${RESET}"
+
+        echo -e "${RED}Ошибка: отсутствует [Peer]${RESET}"
         exit 1
     fi
 
-    # Удаляем CRLF
-    sed -i 's/\r//g' "$CONFIG_FILE"
+    # Remove DNS lines
+    sed -i '/^DNS/d' "$CONFIG_FILE"
 
-    # Добавляем Keepalive если отсутствует
+    # Add keepalive if missing
     if ! grep -qi '^PersistentKeepalive' "$CONFIG_FILE"; then
 
         sed -i '/^\[Peer\]/a PersistentKeepalive = 25' "$CONFIG_FILE"
@@ -284,39 +366,24 @@ read_config() {
 
     chmod 600 "$CONFIG_FILE"
 
-    echo -e "${GREEN}Конфиг сохранен.${RESET}"
+    echo -e "${GREEN}Конфиг сохранен${RESET}"
 }
 
 # ============================================================
-# Backup current config
+# Stop tunnel
 # ============================================================
 
-backup_config() {
+stop_tunnel() {
 
-    if [[ -f "$CONFIG_FILE" ]]; then
+    systemctl stop awg-quick@awg0 2>/dev/null || true
 
-        cp "$CONFIG_FILE" "${CONFIG_FILE}.backup"
-    fi
+    awg-quick down awg0 2>/dev/null || true
+
+    ip link delete awg0 2>/dev/null || true
 }
 
 # ============================================================
-# Restore backup
-# ============================================================
-
-restore_backup() {
-
-    if [[ -f "${CONFIG_FILE}.backup" ]]; then
-
-        cp "${CONFIG_FILE}.backup" "$CONFIG_FILE"
-
-        systemctl restart awg-quick@awg0 || true
-
-        echo -e "${YELLOW}Восстановлен предыдущий конфиг.${RESET}"
-    fi
-}
-
-# ============================================================
-# Start tunnel safely
+# Start tunnel
 # ============================================================
 
 start_tunnel() {
@@ -337,6 +404,8 @@ start_tunnel() {
 
         restore_backup
 
+        restore_dns
+
         exit 1
     fi
 
@@ -348,12 +417,35 @@ start_tunnel() {
 
         restore_backup
 
+        restore_dns
+
         exit 1
     fi
 }
 
 # ============================================================
-# Show status
+# Remove installation
+# ============================================================
+
+remove_awg() {
+
+    echo -e "${YELLOW}Удаление AmneziaWG...${RESET}"
+
+    stop_tunnel
+
+    systemctl disable awg-quick@awg0 2>/dev/null || true
+
+    rm -f /etc/systemd/system/multi-user.target.wants/awg-quick@awg0.service
+
+    rm -rf "$CONFIG_DIR"
+
+    restore_dns
+
+    echo -e "${GREEN}Удаление завершено${RESET}"
+}
+
+# ============================================================
+# Status
 # ============================================================
 
 show_status() {
@@ -386,59 +478,74 @@ show_status() {
 # Main
 # ============================================================
 
-show_header
+main() {
 
-case "${1:-install}" in
+    check_root
 
-    install)
+    show_header
 
-        install_dependencies
-        install_go
-        install_amneziawg_go
-        install_awg_tools
+    case "${1:-install}" in
 
-        backup_config
+        install)
 
-        read_config
-        start_tunnel
-        show_status
-        ;;
+            check_internet
 
-    reinstall)
+            install_dependencies
+            install_go
+            install_amneziawg_go
+            install_awg_tools
 
-        remove_awg
+            backup_config
 
-        install_dependencies
-        install_go
-        install_amneziawg_go
-        install_awg_tools
+            read_config
 
-        read_config
-        start_tunnel
-        show_status
-        ;;
+            stop_tunnel
 
-    remove)
+            start_tunnel
 
-        remove_awg
-        ;;
+            show_status
+            ;;
 
-    status)
+        reinstall)
 
-        systemctl status awg-quick@awg0 --no-pager
-        ;;
+            remove_awg
 
-    *)
+            install_dependencies
+            install_go
+            install_amneziawg_go
+            install_awg_tools
 
-        echo
-        echo "Использование:"
-        echo
-        echo "install     - установка"
-        echo "reinstall   - переустановка"
-        echo "remove      - удаление"
-        echo "status      - статус"
-        echo
+            read_config
 
-        exit 1
-        ;;
-esac
+            start_tunnel
+
+            show_status
+            ;;
+
+        remove)
+
+            remove_awg
+            ;;
+
+        status)
+
+            systemctl status awg-quick@awg0 --no-pager
+            ;;
+
+        *)
+
+            echo
+            echo "Использование:"
+            echo
+            echo "install     - установка"
+            echo "reinstall   - переустановка"
+            echo "remove      - удаление"
+            echo "status      - статус"
+            echo
+
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
