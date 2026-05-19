@@ -130,7 +130,7 @@ curl -fsSL https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/insta
                               ▼
                   ┌─────────────────────────┐
                   │     VPS AmneziaWG       │
-                  │      10.81.0.1          │
+                  │      10.8.0.1           │
                   └─────────┬───────────────┘
                             │
         ┌───────────────────┼───────────────────┐
@@ -140,7 +140,7 @@ curl -fsSL https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/insta
 ┌────────────────┐ ┌────────────────┐ ┌────────────────┐
 │  Wiren Board   │ │  Wiren Board   │ │  Wiren Board   │
 │      #1        │ │      #2        │ │      #3        │
-│   10.81.0.10   │ │   10.81.0.11   │ │   10.81.0.12   │
+│   10.8.0.10    │ │   10.8.0.11    │ │   10.8.0.12    │
 └────────────────┘ └────────────────┘ └────────────────┘
 ```
 
