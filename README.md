@@ -18,4 +18,4 @@
 2. Скопируйте и выполните следующую команду:
 
 ```bash
-bash <(curl -sL [https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/install_awg.sh](https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/install_awg.sh))
+bash <(curl -sL https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/install_awg.sh)
