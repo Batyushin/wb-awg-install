@@ -116,9 +116,6 @@ curl -fsSL https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/insta
 curl -fsSL https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/install_awg.sh | bash -s status
 ```
 
----
-
-# 📊 Как проверить
 
 ```bash
 ping -I awg0 -c 4 10.8.0.1
