@@ -118,6 +118,14 @@ curl -fsSL https://raw.githubusercontent.com/Batyushin/wb-awg-install/main/insta
 
 ---
 
+# 📊 Как проверить
+
+```bash
+ping -I awg0 -c 4 10.8.0.1
+```
+
+---
+
 # 🏗️ Рекомендуемая схема сети
 
 ```text
