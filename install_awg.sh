@@ -6,7 +6,7 @@ set -Eeuo pipefail
 #  AmneziaWG Installer for Wiren Board
 # ============================================================
 
-VERSION="2.3"
+VERSION="2.4"
 
 # ============================================================
 # Colors
@@ -28,6 +28,10 @@ CONFIG_DIR="/etc/amnezia/amneziawg"
 CONFIG_FILE="${CONFIG_DIR}/awg0.conf"
 BACKUP_FILE="${CONFIG_DIR}/awg0.conf.backup"
 DNS_BACKUP="/tmp/resolv.conf.backup"
+
+# ВЕРСИЯ 2.4: Используем огромный раздел /mnt/data для тяжелой сборки
+BUILD_DIR="/mnt/data/awg_build"
+GO_DIR="${BUILD_DIR}/go"
 
 # ============================================================
 # Spinner
@@ -140,7 +144,9 @@ restore_dns() {
 # ============================================================
 
 cleanup_temp() {
+    # Чистим старые пути (на всякий случай) и новую сборочную директорию
     rm -rf /tmp/amneziawg-go /tmp/amneziawg-tools /tmp/go.tar.gz
+    rm -rf "$BUILD_DIR"
 }
 
 # ============================================================
@@ -177,7 +183,7 @@ install_dependencies() {
 }
 
 # ============================================================
-# Install Go
+# Install Go (в /mnt/data)
 # ============================================================
 
 install_go() {
@@ -186,21 +192,22 @@ install_go() {
     fi
     echo -ne "${CYAN}Установка Go... ${RESET}"
     {
-        wget -q "https://go.dev/dl/go1.22.3.${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz
-        rm -rf /usr/local/go
-        tar -C /usr/local -xzf /tmp/go.tar.gz
+        mkdir -p "$BUILD_DIR"
+        wget -q "https://go.dev/dl/go1.22.3.${GO_ARCH}.tar.gz" -O "${BUILD_DIR}/go.tar.gz"
+        rm -rf "$GO_DIR"
+        tar -C "$BUILD_DIR" -xzf "${BUILD_DIR}/go.tar.gz"
     } >/dev/null 2>&1 &
     
     local pid=$!
     spinner $pid
     wait $pid || { echo -e "${RED}Ошибка установки Go!${RESET}"; exit 1; }
     
-    export PATH=$PATH:/usr/local/go/bin
+    export PATH=$PATH:"${GO_DIR}/bin"
     echo -e "${GREEN}OK${RESET}"
 }
 
 # ============================================================
-# Install amneziawg-go
+# Install amneziawg-go (в /mnt/data)
 # ============================================================
 
 install_amneziawg_go() {
@@ -209,11 +216,12 @@ install_amneziawg_go() {
     fi
     echo -ne "${CYAN}Сборка amneziawg-go... ${RESET}"
     {
-        cd /tmp
+        mkdir -p "$BUILD_DIR"
+        cd "$BUILD_DIR"
         rm -rf amneziawg-go
         git clone https://github.com/amnezia-vpn/amneziawg-go.git >/dev/null 2>&1
         cd amneziawg-go
-        export PATH=$PATH:/usr/local/go/bin
+        export PATH=$PATH:"${GO_DIR}/bin"
         make >/dev/null 2>&1
         cp amneziawg-go /usr/bin/
         chmod +x /usr/bin/amneziawg-go
@@ -226,7 +234,7 @@ install_amneziawg_go() {
 }
 
 # ============================================================
-# Install awg-tools
+# Install awg-tools (в /mnt/data)
 # ============================================================
 
 install_awg_tools() {
@@ -235,7 +243,8 @@ install_awg_tools() {
     fi
     echo -ne "${CYAN}Сборка awg-tools... ${RESET}"
     {
-        cd /tmp
+        mkdir -p "$BUILD_DIR"
+        cd "$BUILD_DIR"
         rm -rf amneziawg-tools
         git clone https://github.com/amnezia-vpn/amneziawg-tools.git >/dev/null 2>&1
         cd amneziawg-tools/src
